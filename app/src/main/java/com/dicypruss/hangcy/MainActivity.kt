@@ -37,14 +37,19 @@ import androidx.core.content.ContextCompat
 import com.dicypruss.hangcy.history.RejectedCall
 import com.dicypruss.hangcy.history.RejectedCallStore
 import com.dicypruss.hangcy.prefs.RejectPreferences
+import com.dicypruss.hangcy.sim.SimLine
+import com.dicypruss.hangcy.sim.SimRepository
 import java.text.DateFormat
 import java.util.Date
 
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { RejectPreferences(this) }
     private val history by lazy { RejectedCallStore.get(this) }
+    private val sims by lazy { SimRepository(this) }
     private var roleHeld by mutableStateOf(false)
-    private var rejectIncoming by mutableStateOf(false)
+    private var simLines by mutableStateOf<List<SimLine>>(emptyList())
+    private var rejectWhenUnknown by mutableStateOf(false)
+    private var rejectBySubId by mutableStateOf<Map<Int, Boolean>>(emptyMap())
     private var rejectedCalls by mutableStateOf<List<RejectedCall>>(emptyList())
     private val onHistoryChanged: () -> Unit = {
         runOnUiThread {
@@ -54,7 +59,9 @@ class MainActivity : ComponentActivity() {
 
     private val requestPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { }
+    ) {
+        refreshSimState()
+    }
 
     private val requestRole = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -65,12 +72,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        rejectIncoming = prefs.isRejectIncoming()
+        refreshSimState()
         val missing = buildList {
             if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.READ_CONTACTS)
                 != PackageManager.PERMISSION_GRANTED
             ) {
                 add(Manifest.permission.READ_CONTACTS)
+            }
+            if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.READ_PHONE_STATE)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.READ_PHONE_STATE)
             }
             if (Build.VERSION.SDK_INT >= 33 &&
                 ContextCompat.checkSelfPermission(
@@ -89,12 +101,18 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     HangcyScreen(
                         roleHeld = roleHeld,
-                        rejectIncoming = rejectIncoming,
+                        simLines = simLines,
+                        rejectWhenUnknown = rejectWhenUnknown,
+                        rejectBySubId = rejectBySubId,
                         rejectedCalls = rejectedCalls,
                         onRequestRole = ::requestCallScreeningRole,
-                        onRejectIncomingChange = { enabled ->
-                            rejectIncoming = enabled
-                            prefs.setRejectIncoming(enabled)
+                        onRejectWhenUnknownChange = { enabled ->
+                            rejectWhenUnknown = enabled
+                            prefs.setRejectWhenUnknown(enabled)
+                        },
+                        onRejectSubChange = { subscriptionId, enabled ->
+                            rejectBySubId = rejectBySubId + (subscriptionId to enabled)
+                            prefs.setRejectForSubscription(subscriptionId, enabled)
                         },
                     )
                 }
@@ -111,11 +129,21 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         roleHeld = isCallScreeningRoleHeld()
         rejectedCalls = history.load()
+        refreshSimState()
     }
 
     override fun onStop() {
         history.removeListener(onHistoryChanged)
         super.onStop()
+    }
+
+    private fun refreshSimState() {
+        val lines = sims.lines()
+        simLines = lines
+        rejectWhenUnknown = prefs.isRejectWhenUnknown()
+        rejectBySubId = lines.associate { line ->
+            line.subscriptionId to prefs.isRejectForSubscription(line.subscriptionId)
+        }
     }
 
     private fun isCallScreeningRoleHeld(): Boolean {
@@ -134,10 +162,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun HangcyScreen(
     roleHeld: Boolean,
-    rejectIncoming: Boolean,
+    simLines: List<SimLine>,
+    rejectWhenUnknown: Boolean,
+    rejectBySubId: Map<Int, Boolean>,
     rejectedCalls: List<RejectedCall>,
     onRequestRole: () -> Unit,
-    onRejectIncomingChange: (Boolean) -> Unit,
+    onRejectWhenUnknownChange: (Boolean) -> Unit,
+    onRejectSubChange: (Int, Boolean) -> Unit,
 ) {
     val unknownNumber = stringResource(R.string.unknown_number)
     val timeFormat = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
@@ -162,20 +193,23 @@ private fun HangcyScreen(
                 Text(stringResource(R.string.set_as_caller_id))
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.reject_incoming),
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f).padding(end = 16.dp),
+        if (simLines.isEmpty()) {
+            RejectSwitchRow(
+                title = stringResource(R.string.reject_incoming),
+                checked = rejectWhenUnknown,
+                onCheckedChange = onRejectWhenUnknownChange,
             )
-            Switch(
-                checked = rejectIncoming,
-                onCheckedChange = onRejectIncomingChange,
-            )
+        } else {
+            simLines.forEach { line ->
+                RejectSwitchRow(
+                    title = line.displayName,
+                    subtitle = stringResource(R.string.sim_slot, line.slotIndex + 1),
+                    checked = rejectBySubId[line.subscriptionId] == true,
+                    onCheckedChange = { enabled ->
+                        onRejectSubChange(line.subscriptionId, enabled)
+                    },
+                )
+            }
         }
         Text(
             text = stringResource(R.string.rejected_calls),
@@ -208,5 +242,31 @@ private fun HangcyScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RejectSwitchRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    subtitle: String? = null,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
