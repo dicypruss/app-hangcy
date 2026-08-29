@@ -7,30 +7,19 @@ import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
-import android.util.Log
 import com.dicypruss.hangcy.sim.SimLine
 
 class CallSimResolver(context: Context) {
     private val appContext = context.applicationContext
 
-    fun match(handle: PhoneAccountHandle?, lines: List<SimLine>): CallSimMatch {
+    fun match(handle: PhoneAccountHandle?, lines: List<SimLine>): Int? {
         val callStates = snapshotCallStates(lines)
         val account = handle?.let { phoneAccount(it) }
         val fromHandle = handle?.let { matchFromHandle(it, account, lines) }
-        val matched = fromHandle
+        return fromHandle
             ?: CallSimMatcher.matchByRingingSubIds(
                 callStates.filter { it.value == TelephonyManager.CALL_STATE_RINGING }.keys.toList(),
             )
-        Log.i(
-            TAG,
-            "sim match handleId=${handle?.id} label=${account?.label} subId=$matched states=$callStates",
-        )
-        return CallSimMatch(
-            subscriptionId = matched,
-            accountLabel = account?.label?.toString(),
-            handleId = handle?.id,
-            callStates = callStates,
-        )
     }
 
     private fun matchFromHandle(
@@ -121,6 +110,5 @@ class CallSimResolver(context: Context) {
 
     companion object {
         private const val SORT_ORDER_EXTRA = "android.telecom.extra.SORT_ORDER"
-        private const val TAG = "Hangcy"
     }
 }

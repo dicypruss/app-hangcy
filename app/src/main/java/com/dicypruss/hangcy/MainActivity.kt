@@ -203,7 +203,6 @@ private fun HangcyScreen(
             simLines.forEach { line ->
                 RejectSwitchRow(
                     title = line.displayName,
-                    subtitle = stringResource(R.string.sim_slot, line.slotIndex + 1),
                     checked = rejectBySubId[line.subscriptionId] == true,
                     onCheckedChange = { enabled ->
                         onRejectSubChange(line.subscriptionId, enabled)

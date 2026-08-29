@@ -4,7 +4,6 @@
     <string name="set_as_caller_id">Set as caller ID app</string>
     <string name="caller_id_active">Caller ID is on</string>
     <string name="reject_incoming">Reject incoming</string>
-    <string name="sim_slot">SIM %1$d</string>
     <string name="call_rejected_title">Call rejected</string>
     <string name="unknown_number">Unknown number</string>
     <string name="blocked_calls_channel">Blocked calls</string>
