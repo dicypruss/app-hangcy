@@ -6,18 +6,22 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -25,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +56,8 @@ class MainActivity : ComponentActivity() {
     private var rejectWhenUnknown by mutableStateOf(false)
     private var rejectBySubId by mutableStateOf<Map<Int, Boolean>>(emptyMap())
     private var rejectedCalls by mutableStateOf<List<RejectedCall>>(emptyList())
+    private var showPrivacy by mutableStateOf(false)
+    private val privacyText by lazy { loadPrivacyText() }
     private val onHistoryChanged: () -> Unit = {
         runOnUiThread {
             rejectedCalls = history.load()
@@ -99,22 +106,31 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    HangcyScreen(
-                        roleHeld = roleHeld,
-                        simLines = simLines,
-                        rejectWhenUnknown = rejectWhenUnknown,
-                        rejectBySubId = rejectBySubId,
-                        rejectedCalls = rejectedCalls,
-                        onRequestRole = ::requestCallScreeningRole,
-                        onRejectWhenUnknownChange = { enabled ->
-                            rejectWhenUnknown = enabled
-                            prefs.setRejectWhenUnknown(enabled)
-                        },
-                        onRejectSubChange = { subscriptionId, enabled ->
-                            rejectBySubId = rejectBySubId + (subscriptionId to enabled)
-                            prefs.setRejectForSubscription(subscriptionId, enabled)
-                        },
-                    )
+                    if (showPrivacy) {
+                        BackHandler { showPrivacy = false }
+                        PrivacyScreen(
+                            body = privacyText,
+                            onBack = { showPrivacy = false },
+                        )
+                    } else {
+                        HangcyScreen(
+                            roleHeld = roleHeld,
+                            simLines = simLines,
+                            rejectWhenUnknown = rejectWhenUnknown,
+                            rejectBySubId = rejectBySubId,
+                            rejectedCalls = rejectedCalls,
+                            onRequestRole = ::requestCallScreeningRole,
+                            onRejectWhenUnknownChange = { enabled ->
+                                rejectWhenUnknown = enabled
+                                prefs.setRejectWhenUnknown(enabled)
+                            },
+                            onRejectSubChange = { subscriptionId, enabled ->
+                                rejectBySubId = rejectBySubId + (subscriptionId to enabled)
+                                prefs.setRejectForSubscription(subscriptionId, enabled)
+                            },
+                            onPrivacyClick = { showPrivacy = true },
+                        )
+                    }
                 }
             }
         }
@@ -157,6 +173,18 @@ class MainActivity : ComponentActivity() {
             roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING),
         )
     }
+
+    private fun loadPrivacyText(): String {
+        return try {
+            assets.open(PRIVACY_ASSET).bufferedReader().use { it.readText() }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private companion object {
+        const val PRIVACY_ASSET = "privacy.txt"
+    }
 }
 
 @Composable
@@ -169,6 +197,7 @@ private fun HangcyScreen(
     onRequestRole: () -> Unit,
     onRejectWhenUnknownChange: (Boolean) -> Unit,
     onRejectSubChange: (Int, Boolean) -> Unit,
+    onPrivacyClick: () -> Unit,
 ) {
     val unknownNumber = stringResource(R.string.unknown_number)
     val timeFormat = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
@@ -219,6 +248,7 @@ private fun HangcyScreen(
                 text = stringResource(R.string.no_rejected_calls),
                 style = MaterialTheme.typography.bodyMedium,
             )
+            Spacer(modifier = Modifier.weight(1f))
         } else {
             LazyColumn(
                 modifier = Modifier
@@ -240,6 +270,9 @@ private fun HangcyScreen(
                     }
                 }
             }
+        }
+        TextButton(onClick = onPrivacyClick) {
+            Text(stringResource(R.string.privacy))
         }
     }
 }
@@ -267,5 +300,35 @@ private fun RejectSwitchRow(
             }
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun PrivacyScreen(
+    body: String,
+    onBack: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        TextButton(onClick = onBack) {
+            Text(stringResource(R.string.back))
+        }
+        Text(
+            text = stringResource(R.string.privacy),
+            style = MaterialTheme.typography.headlineMedium,
+        )
+        Text(
+            text = body,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }

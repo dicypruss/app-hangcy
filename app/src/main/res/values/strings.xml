@@ -9,4 +9,6 @@
     <string name="blocked_calls_channel">Blocked calls</string>
     <string name="rejected_calls">Rejected calls</string>
     <string name="no_rejected_calls">No rejected calls</string>
+    <string name="privacy">Privacy</string>
+    <string name="back">Back</string>
 </resources>
